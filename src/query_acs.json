@@ -1,0 +1,26 @@
+{
+    "name": "query_acs",
+    "description": "Execute a query against an index named '<YOUR-INDEX-NAME>' in Azure Cognitive Search instance named '<YOUR-ACS-NAME>'",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "search_service": {
+          "type": "string",
+          "description": "The name of the Azure Cognitive Search service"
+        },
+        "search_index": {
+          "type": "string",
+          "description": "The name of the Azure Cognitive Search Index to be queried"
+        },
+        "query": {
+          "type": "string",
+          "description": "The query to execute"
+        }
+      },
+      "required": [
+        "search_service",
+        "search_index",
+        "query"
+      ]
+    }
+  }
