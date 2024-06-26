@@ -1,0 +1,16 @@
+{
+    "name": "get_acs_schema",
+    "description": "Retrieve the schema (indexes, fields, etc.) of an Azure ACS service service named '<YOUR-ACS-NAME>'",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "search_service": {
+          "type": "string",
+          "description": "The URL of the ACS search service to retrieve the schema for"
+        }
+      },
+      "required": [
+        "search_service"
+      ]
+    }
+  }

@@ -3,6 +3,9 @@ import streamlit as st
 import pandas as pd  
 import json, dotenv, os, time, pyodbc
 from openai import AzureOpenAI
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+from azure.search.documents.indexes import SearchIndexClient
 
 # Load environment variables from .env file
 dotenv.load_dotenv(override=True)
@@ -36,6 +39,37 @@ def connect_to_sql_db():
 
     return conn
 
+def connect_to_acs_index():
+    """
+    Connects to the target ACS Service and index and returns a connection object
+
+    """
+
+    SEARCH_URL = os.getenv('SEARCH_URL')
+    SEARCH_KEY = os.getenv('SEARCH_KEY')
+    SEARCH_INDEX = os.getenv('SEARCH_INDEX')
+    SEARCH_API = os.getenv('SEARCH_API')
+
+    # connect to the ACS service
+    search_client = SearchClient(SEARCH_URL, SEARCH_INDEX, AzureKeyCredential(SEARCH_KEY), api_version=SEARCH_API)
+
+    return search_client
+
+def connect_to_acs_service():
+    """
+    Connects to the target ACS Service and returns a connection object
+
+    """
+
+    SEARCH_URL = os.getenv('SEARCH_URL')
+    SEARCH_KEY = os.getenv('SEARCH_KEY')
+    SEARCH_API = os.getenv('SEARCH_API')
+
+    # connect to the ACS service
+    search_client = SearchIndexClient(SEARCH_URL, AzureKeyCredential(SEARCH_KEY), api_version=SEARCH_API)
+
+    return search_client
+
 def get_assistant(client):
     assistant_id = os.getenv('ASSISTANT_ID')
     assistants = client.beta.assistants.list()
@@ -43,7 +77,7 @@ def get_assistant(client):
     return_value = None
 
     for assistant in assistants:
-        if assistant.name == 'sqlchat':
+        if assistant.name == 'sqlacschat':
             return_value = assistant
         elif assistant.id == assistant_id:
             return assistant
@@ -57,16 +91,22 @@ def create_assistant(client):
     model = os.getenv('AZURE_OPENAI_CHAT_MODEL_DEPLOYMENT_NAME')
 
     # read the assistant sys msg from file
-    assistant_sys_msg = open('assistant_sys_msg.txt', 'r').read()
+    assistant_sys_msg = open('assistant_sys_msg_RT.txt', 'r').read() #./src/
 
     # read the get_sql_db_schema function from file
-    get_sql_db_schema_func = json.loads(open('get_sql_db_schema.json', 'r').read())
+    get_sql_db_schema_func = json.loads(open('get_sql_db_schema.json', 'r').read()) #./src/
 
     # read the query_sql_db function from file
-    query_sql_db_func = json.loads(open('query_sql_db.json', 'r').read())
+    query_sql_db_func = json.loads(open('query_sql_db.json', 'r').read()) #./src/
+
+    # read the query_acs function from file
+    query_acs_func = json.loads(open('query_acs.json', 'r').read()) #./src/
+
+    # read the get_sql_db_schema function from file
+    get_acs_schema_func = json.loads(open('get_acs_schema.json', 'r').read()) #./src/
 
     assistant = client.beta.assistants.create(
-        name="sqlchat",
+        name="sqlacschat",
         instructions=assistant_sys_msg,
         tools=[
             {
@@ -79,6 +119,14 @@ def create_assistant(client):
             {
                 "type": "function",
                 "function": query_sql_db_func
+            },
+            {
+                "type": "function",
+                "function": query_acs_func
+            },
+            {
+                "type": "function",
+                "function": get_acs_schema_func
             }
         ],
         model=model
@@ -86,7 +134,7 @@ def create_assistant(client):
 
     return assistant
 
-def get_sql_db_schema(database):
+def get_sql_db_schema(databse):
     """
     Retrieves schema (tables, columns, and column types) for target SQL database and returns as a JSON dictionary
 
@@ -114,6 +162,31 @@ def get_sql_db_schema(database):
         
     return table_details
 
+def get_acs_schema():
+    """
+    Retrieves schema (indexes, fields, and field types) for target ACS Index and returns as a JSON dictionary
+
+    :param search_client: str, the name of the SQL database.
+
+    """
+    with connect_to_acs_service() as search_index_client:
+
+        # Get all indexes in the ACS service
+        indexes = search_index_client.get_indexes()
+
+        index_details = []
+        for index in indexes:
+            curr_index = {'index': f'{index.name}', 'fields': []}
+            #get all fields and their types
+            fields = search_index_client.get_index(index.name).fields
+            for field in fields:
+                curr_index['fields'].append({'name': field.name, 'type': field.type})
+
+            index_details.append(curr_index)
+        
+        print(index_details)
+        return index_details
+
 def query_sql_db(query):
     """
     Executes a query against an Azure SQL database and returns results as a pandas dataframe
@@ -123,6 +196,31 @@ def query_sql_db(query):
     with connect_to_sql_db() as conn:
         # Execute the query and return the results as a pandas dataframe
         dataframe = pd.read_sql(query, conn)
+        return dataframe
+
+def query_acs(query):
+    """
+    Executes a query against an ACS index and returns results as a pandas dataframe
+
+    :param query: str, query to be executed.
+    """
+
+    #your code goes here:
+    with connect_to_acs() as search_client:
+
+        #search the index
+
+        results = search_client.search(
+        search_text=query,
+        #filter="Address/StateProvince eq 'FL' and Address/Country eq 'USA'",
+        #select=["hotelName", "rating"],
+        #order_by=["rating desc"],
+    )
+
+        for result in results:
+            print(result)
+        #convert the response to a dataframe
+        dataframe = pd.DataFrame(results)
         return dataframe
 
 # Define a function that waits for a run to complete  
@@ -220,7 +318,7 @@ def start_conversation_turn(run, thread):
                     with st.expander("SQL Database Schema"):  
                         st.dataframe(expanded_df)  
                     # Append the schema to the session state messages  
-                    st.session_state.messages.append({'role': 'schema', 'content': expanded_df})  
+                    st.session_state.messages.append({'role': 'sqlschema', 'content': expanded_df})  
                     # Convert the response to a string for submission  
                     response = str(response)  
   
@@ -228,7 +326,7 @@ def start_conversation_turn(run, thread):
                     # Handle any exceptions and store the error message  
                     response = 'Encountered error: ' + str(e)  
                     # Append the error message to the session state messages  
-                    st.session_state.messages.append({'role': 'schemaerror', 'content': response})  
+                    st.session_state.messages.append({'role': 'sqlschemaerror', 'content': response})  
                     # Display the error message in an expandable section  
                     with st.expander("Database Schema"):  
                         st.write(response)  
@@ -259,6 +357,32 @@ def start_conversation_turn(run, thread):
                     # Append the error message to the session state messages  
                     st.session_state.messages.append({'role': 'sqlerror', 'content': response})  
   
+            #check for ACS query
+            elif func_name == "query_acs":  
+                # Display the ACS query in an expandable section  
+                with st.expander("ACS Query"):  
+                    st.write(f'```{args["query"]}```')  
+                    # Append the ACS query to the session state messages  
+                    st.session_state.messages.append({'role': 'acsquery', 'content': args['query']})  
+                try:  
+                    # Call the function to execute the SQL query with the provided arguments  
+                    response = (query_acs(args['query']))  
+                    # Display the query results in an expandable section  
+                    with st.expander("ACS Data"):  
+                        st.dataframe(response)  
+                    # Append the query results to the session state messages  
+                    st.session_state.messages.append({'role': 'acsdata', 'content': response})  
+                    # Convert the response to a string for submission  
+                    response = str(response)  
+                except Exception as e:  
+                    # Handle any exceptions and store the error message  
+                    response = 'Encountered error: ' + str(e)  
+                    # Display the error message in an expandable section  
+                    with st.expander("ACS Data"):  
+                        st.write(response)  
+                    # Append the error message to the session state messages  
+                    st.session_state.messages.append({'role': 'acserror', 'content': response})  
+
             # Display a message indicating that analysis is in progress  
             with st.chat_message('assistant'):  
                 st.write('*Analyzing...*')  
@@ -279,7 +403,6 @@ def start_conversation_turn(run, thread):
             # If no required action, set the flag to False to exit the loop  
             keep_going = False  
 
-
 # Define a function to update messages in the Streamlit session state  
 def update_messages():  
     # Iterate over each message in the session state's messages list  
@@ -291,15 +414,15 @@ def update_messages():
                 # Display the image content of the message  
                 st.image(message['content'])  
   
-        # Check if the message role is 'schema'  
-        elif message['role'] =='schema':  
+        # Check if the message role is 'sqlschema'  
+        elif message['role'] =='sqlschema':  
             # Create an expandable section titled "Database Schema"  
             with st.expander("Database Schema"):  
                 # Display the dataframe content of the message  
                 st.dataframe(message['content'])  
   
         # Check if the message role is 'schemaerror'  
-        elif message['role'] =='schemaerror':  
+        elif message['role'] =='sqlschemaerror':  
             # Create an expandable section titled "Database Schema"  
             with st.expander("Database Schema"):  
                 # Write the error content of the message  
@@ -326,12 +449,48 @@ def update_messages():
                 # Write the error content of the message  
                 st.write(message['content'])  
   
+        #Start ACS:
+        # Check if the message role is 'acsschema'  
+        elif message['role'] =='acsschema':  
+            # Create an expandable section titled "ACS Schema"  
+            with st.expander("ACS Schema"):  
+                # Display the dataframe content of the message  
+                st.dataframe(message['content'])  
+  
+        # Check if the message role is 'acsschemaerror'  
+        elif message['role'] =='acsschemaerror':  
+            # Create an expandable section titled "ACS Schema"  
+            with st.expander("ACS Schema"):  
+                # Write the error content of the message  
+                st.write(message['content'])  
+  
+        # Check if the message role is 'acsquery'  
+        elif message['role'] =='acsquery':  
+            # Create an expandable section titled "SQL Query"  
+            with st.expander("ACS Query"):  
+                # Write the SQL query content of the message as a code block  
+                st.write(f"```{message['content']}")  
+  
+        # Check if the message role is 'acsdata'  
+        elif message['role'] =='acsdata':  
+            # Create an expandable section titled "SQL Data"  
+            with st.expander("ACS Data"):  
+                # Display the dataframe content of the message  
+                st.dataframe(message['content'])  
+  
+        # Check if the message role is 'acserror'  
+        elif message['role'] =='acserror':  
+            # Create an expandable section titled "SQL Data"  
+            with st.expander("ACS Data"):  
+                # Write the error content of the message  
+                st.write(message['content'])  
+  
         # If the message role is anything else  
         else:  
             # Create a chat message block with the role specified in the message  
             with st.chat_message(message['role']):  
                 # Display the content of the message using markdown formatting  
-                st.markdown(message['content'])  
+                st.markdown(message['content'])              
 
 ######################### UTILITIES END #########################
 
