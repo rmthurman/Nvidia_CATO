@@ -15,6 +15,8 @@ client = AzureOpenAI(azure_endpoint=os.environ['AZURE_OPENAI_API_ENDPOINT'],
                      api_version=os.environ['AZURE_OPENAI_API_VERSION'], 
                      api_key=os.environ['AZURE_OPENAI_API_KEY'])
 
+POLLING_INTERVAL = os.environ['POLLING_INTERVAL']
+
 ######################### UTILITIES START #########################
 
 def connect_to_sql_db():
@@ -91,7 +93,7 @@ def create_assistant(client):
     model = os.getenv('AZURE_OPENAI_CHAT_MODEL_DEPLOYMENT_NAME')
 
     # read the assistant sys msg from file
-    assistant_sys_msg = open('assistant_sys_msg_RT.txt', 'r').read() #./src/
+    assistant_sys_msg = open('assistant_sys_msg.txt', 'r').read() #./src/
 
     # read the get_sql_db_schema function from file
     get_sql_db_schema_func = json.loads(open('get_sql_db_schema.json', 'r').read()) #./src/
@@ -232,8 +234,8 @@ def wait_on_run(run, thread):
             thread_id=thread.id,  
             run_id=run.id,  
         )  
-        # Sleep for half a second before checking the status again  
-        time.sleep(0.5)  
+        # Sleep for x seconds before checking the status again  
+        time.sleep(POLLING_INTERVAL)  
     # Return the run object once it is no longer queued or in progress  
     return run  
   
@@ -385,7 +387,7 @@ def start_conversation_turn(run, thread):
 
             # Display a message indicating that analysis is in progress  
             with st.chat_message('assistant'):  
-                st.write('*Analyzing...*')  
+                st.write('*Analyzing*')  
   
             # Submit the tool outputs back to the API to update the run  
             run = client.beta.threads.runs.submit_tool_outputs(  
